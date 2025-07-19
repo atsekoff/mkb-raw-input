@@ -1,0 +1,18 @@
+[package]
+name = "mkb-raw-input"
+version = "0.1.0"
+edition = "2024"
+description = "Safe, ergonomic Rust library for Windows Raw Input API (Mouse and Keyboard)"
+license = "MIT OR Apache-2.0"
+keywords = ["windows", "input", "raw-input", "mouse", "keyboard"]
+categories = ["api-bindings", "os::windows-apis"]
+
+[dependencies]
+thiserror = "2.0.12"
+windows = { version = "0.61.3", features = [
+    "Win32_Foundation",
+    "Win32_UI_Input",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+] }
