@@ -69,11 +69,11 @@ impl Drop for ListenerHandle {
 ///
 /// # Example
 /// ```no_run
-/// use mkb_raw_input::{start_listener, RawInputEvent};
+/// use mkb_raw_input::{start_listener, RawInputEvent, VirtualKey};
 ///
 /// let _listener = start_listener(
 ///     |event| match event {
-///         RawInputEvent::Keyboard(kbd) => println!("Key: {}", kbd.vkey),
+///         RawInputEvent::Keyboard(kbd) => println!("Key: {:?}", kbd.vkey),
 ///         RawInputEvent::Mouse(mouse) => println!("Mouse: {},{}", mouse.last_x, mouse.last_y),
 ///     },
 ///     Some(|err| eprintln!("Error: {}", err)),

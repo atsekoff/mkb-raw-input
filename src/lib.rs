@@ -31,20 +31,19 @@
 //!
 //! ## Handling Keyboard Events
 //! ```rust,no_run
-//! use mkb_raw_input::{start_listener, RawInputEvent, RawKeyboardEvent, RawInputError};
+//! use mkb_raw_input::{start_listener, RawInputEvent, RawKeyboardEvent, RawInputError, VirtualKey};
 //!
 //! let _listener = start_listener(
 //!     |event| {
 //!         if let RawInputEvent::Keyboard(kbd) = event {
 //!             // Check if it's a key press (not a key release)
-//!             let is_key_up = (kbd.flags & 0x0001) != 0;
-//!             if !is_key_up {
+//!             if !kbd.key_up {
 //!                 match kbd.vkey {
-//!                     // Virtual key codes (VK_*) from Windows
-//!                     0x1B => println!("ESC pressed"),  // VK_ESCAPE
-//!                     0x41 => println!("A pressed"),    // VK_A
-//!                     0x20 => println!("Space pressed"), // VK_SPACE
-//!                     _ => println!("Key pressed: {}", kbd.vkey),
+//!                     // Use the VirtualKey enum for better type safety
+//!                     VirtualKey::Escape => println!("ESC pressed"),
+//!                     VirtualKey::A => println!("A pressed"),
+//!                     VirtualKey::Space => println!("Space pressed"),
+//!                     other => println!("Key pressed: {:?}", other),
 //!                 }
 //!             }
 //!         }
@@ -56,7 +55,7 @@
 //!
 //! ## Handling Mouse Events
 //! ```rust,no_run
-//! use mkb_raw_input::{start_listener, RawInputEvent, RawMouseEvent, RawInputError};
+//! use mkb_raw_input::{start_listener, RawInputEvent, RawMouseEvent, RawInputError, MouseButtonAction};
 //!
 //! let _listener = start_listener(
 //!     |event| {
@@ -66,20 +65,23 @@
 //!                 println!("Mouse moved: ({}, {})", mouse.last_x, mouse.last_y);
 //!             }
 //!
-//!             // Check for button presses
-//!             match mouse.button_flags {
-//!                 0x0001 => println!("Left button down"),
-//!                 0x0002 => println!("Left button up"),
-//!                 0x0004 => println!("Right button down"),
-//!                 0x0008 => println!("Right button up"),
-//!                 0x0010 => println!("Middle button down"),
-//!                 0x0020 => println!("Middle button up"),
-//!                 0x0400 => {
-//!                     // Mouse wheel vertical
-//!                     let wheel_delta = mouse.button_data as i16;
-//!                     println!("Mouse wheel: {}", wheel_delta);
-//!                 },
-//!                 _ => {}, // Other button combinations
+//!             // Check for button actions using the enhanced enum
+//!             match mouse.button_action {
+//!                 MouseButtonAction::LeftDown => println!("Left button down"),
+//!                 MouseButtonAction::LeftUp => println!("Left button up"),
+//!                 MouseButtonAction::RightDown => println!("Right button down"),
+//!                 MouseButtonAction::RightUp => println!("Right button up"),
+//!                 MouseButtonAction::MiddleDown => println!("Middle button down"),
+//!                 MouseButtonAction::MiddleUp => println!("Middle button up"),
+//!                 MouseButtonAction::XButton1Down => println!("X1 button down"),
+//!                 MouseButtonAction::XButton1Up => println!("X1 button up"),
+//!                 MouseButtonAction::XButton2Down => println!("X2 button down"),
+//!                 MouseButtonAction::XButton2Up => println!("X2 button up"),
+//!                 MouseButtonAction::WheelUp(lines) => println!("Mouse wheel up: {} lines", lines),
+//!                 MouseButtonAction::WheelDown(lines) => println!("Mouse wheel down: {} lines", lines),
+//!                 MouseButtonAction::WheelRight(lines) => println!("Mouse wheel right: {} lines", lines),
+//!                 MouseButtonAction::WheelLeft(lines) => println!("Mouse wheel left: {} lines", lines),
+//!                 MouseButtonAction::None => {}, // No button action
 //!             }
 //!         }
 //!     },
@@ -150,8 +152,15 @@
 
 mod event;
 mod ffi;
+mod keyboard;
+mod mouse;
 
-pub use event::{RawInputEvent, RawKeyboardEvent, RawMouseEvent};
+pub use event::RawInputEvent;
+pub use keyboard::RawKeyboardEvent;
+pub use mouse::RawMouseEvent;
+// Re-export key and mouse related enums for easier access
+pub use keyboard::{KeyEventMessage, KeyFlags, VirtualKey};
+pub use mouse::{MouseButtonAction, MouseMoveMode};
 use windows::Win32::UI::Input::RAWINPUT;
 
 /// Registers the library to receive raw input from keyboard and mouse devices.
@@ -239,7 +248,7 @@ mod tests {
         unsafe {
             let kbd = &mut raw_input.data.keyboard;
             kbd.MakeCode = 30; // 'A' key
-            kbd.Flags = 0; // Key down
+            kbd.Flags = 0; // Key down (no RI_KEY_BREAK)
             kbd.VKey = 65; // VK_A
             kbd.Message = 256; // WM_KEYDOWN
             kbd.ExtraInformation = 123;
@@ -255,9 +264,10 @@ mod tests {
         match event {
             Some(RawInputEvent::Keyboard(kbd)) => {
                 assert_eq!(kbd.make_code, 30);
-                assert_eq!(kbd.flags, 0);
-                assert_eq!(kbd.vkey, 65);
-                assert_eq!(kbd.message, 256);
+                assert_eq!(kbd.key_up, false);
+                assert_eq!(kbd.extended, false);
+                assert_eq!(kbd.vkey, VirtualKey::A);
+                assert_eq!(kbd.message, KeyEventMessage::KeyDown);
                 assert_eq!(kbd.extra_information, 123);
             }
             _ => panic!("Expected keyboard event"),
@@ -271,9 +281,10 @@ mod tests {
         raw_input.header.dwType = RIM_TYPEMOUSE.0;
 
         // Set mouse data
+        use crate::mouse::{MOUSE_BUTTON_WHEEL_VERTICAL, MOUSE_MOVE_VIRTUAL_DESKTOP, WHEEL_DELTA};
         unsafe {
             let mouse = &mut raw_input.data.mouse;
-            mouse.usFlags = windows::Win32::UI::Input::MOUSE_STATE(0x01); // MOUSE_MOVE_ABSOLUTE
+            mouse.usFlags = windows::Win32::UI::Input::MOUSE_STATE(MOUSE_MOVE_VIRTUAL_DESKTOP); // MOUSE_MOVE_ABSOLUTE | VIRTUAL_DESKTOP
             mouse.ulRawButtons = 0;
             mouse.lLastX = 100;
             mouse.lLastY = 200;
@@ -281,10 +292,10 @@ mod tests {
 
             // We need to initialize the union field carefully
             // This is a bit tricky with the windows crate unions
-            let buttons = &mut mouse.Anonymous;
-            // Access the union field directly - this is unsafe but necessary for testing
-            std::ptr::write(&mut buttons.Anonymous.usButtonFlags as *mut _, 0x0400u16);
-            std::ptr::write(&mut buttons.Anonymous.usButtonData as *mut _, 120u16);
+            let anon = &mut mouse.Anonymous;
+            let inner = &mut anon.Anonymous;
+            inner.usButtonFlags = MOUSE_BUTTON_WHEEL_VERTICAL; // Wheel vertical
+            inner.usButtonData = WHEEL_DELTA as u16;
         }
 
         // Parse the event
@@ -294,9 +305,14 @@ mod tests {
         assert!(event.is_some(), "Should parse mouse event");
         match event {
             Some(RawInputEvent::Mouse(mouse)) => {
-                assert_eq!(mouse.flags, 0x01);
-                assert_eq!(mouse.button_flags, 0x0400);
-                assert_eq!(mouse.button_data, 120);
+                assert_eq!(mouse.move_mode, MouseMoveMode::Absolute);
+                if let MouseButtonAction::WheelUp(lines_scrolled) = mouse.button_action {
+                    let lines = crate::mouse::get_wheel_scroll_lines()
+                        .unwrap_or(crate::mouse::WHEEL_SCROLL_LINES_DEFAULT);
+                    assert_eq!(lines_scrolled, lines);
+                } else {
+                    panic!("Expected WheelUp mouse action");
+                }
                 assert_eq!(mouse.raw_buttons, 0);
                 assert_eq!(mouse.last_x, 100);
                 assert_eq!(mouse.last_y, 200);

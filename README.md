@@ -47,32 +47,35 @@ fn main() {
 ## Handling Keyboard Events
 
 ```rust
-use mkb_raw_input::{start_listener, RawInputEvent, RawInputError};
+use mkb_raw_input::{start_listener, RawInputEvent, RawKeyboardEvent, VirtualKey};
 
 let _listener = start_listener(
     |event| {
         if let RawInputEvent::Keyboard(kbd) = event {
-            // Check if it's a key press (not a key release)
-            let is_key_up = (kbd.flags & 0x0001) != 0;
-            if !is_key_up {
+            // Use the ergonomic API: key_up, vkey, message
+            if !kbd.key_up {
                 match kbd.vkey {
-                    // Virtual key codes (VK_*) from Windows
-                    0x1B => println!("ESC pressed"),  // VK_ESCAPE
-                    0x41 => println!("A pressed"),    // VK_A
-                    0x20 => println!("Space pressed"), // VK_SPACE
-                    _ => println!("Key pressed: {}", kbd.vkey),
+                    VirtualKey::Escape => println!("ESC pressed"),
+                    VirtualKey::A => println!("A pressed"),
+                    VirtualKey::Space => println!("Space pressed"),
+                    other => println!("Key pressed: {:?}", other),
                 }
             }
         }
     },
-    None::<fn(RawInputError)>,
+    None::<fn(_)> // No error callback
 ).expect("Failed to start listener");
 ```
+
+- `kbd.key_up`: `true` if the key was released, `false` if pressed
+- `kbd.vkey`: ergonomic Rust enum for virtual key codes
+- `kbd.message`: the Windows message (KeyDown, KeyUp, etc.)
+
 
 ## Handling Mouse Events
 
 ```rust
-use mkb_raw_input::{start_listener, RawInputEvent, RawInputError};
+use mkb_raw_input::{start_listener, RawInputEvent, MouseButtonAction};
 
 let _listener = start_listener(
     |event| {
@@ -82,26 +85,30 @@ let _listener = start_listener(
                 println!("Mouse moved: ({}, {})", mouse.last_x, mouse.last_y);
             }
 
-            // Check for button presses
-            match mouse.button_flags {
-                0x0001 => println!("Left button down"),
-                0x0002 => println!("Left button up"),
-                0x0004 => println!("Right button down"),
-                0x0008 => println!("Right button up"),
-                0x0010 => println!("Middle button down"),
-                0x0020 => println!("Middle button up"),
-                0x0400 => {
-                    // Mouse wheel vertical
-                    let wheel_delta = mouse.button_data as i16;
-                    println!("Mouse wheel: {}", wheel_delta);
-                },
-                _ => {}, // Other button combinations
+            // Check for button and wheel actions
+            match mouse.button_action {
+                MouseButtonAction::LeftDown => println!("Left button down"),
+                MouseButtonAction::LeftUp => println!("Left button up"),
+                MouseButtonAction::RightDown => println!("Right button down"),
+                MouseButtonAction::RightUp => println!("Right button up"),
+                MouseButtonAction::MiddleDown => println!("Middle button down"),
+                MouseButtonAction::MiddleUp => println!("Middle button up"),
+                MouseButtonAction::WheelUp(lines) => println!("Mouse wheel up: {} lines", lines),
+                MouseButtonAction::WheelDown(lines) => println!("Mouse wheel down: {} lines", lines),
+                MouseButtonAction::WheelRight(lines) => println!("Mouse wheel right: {} lines", lines),
+                MouseButtonAction::WheelLeft(lines) => println!("Mouse wheel left: {} lines", lines),
+                _ => {},
             }
         }
     },
-    None::<fn(RawInputError)>,
+    None::<fn(_)> // No error callback
 ).expect("Failed to start listener");
 ```
+
+- Mouse wheel events are reported as lines scrolled (already multiplied by the user's system setting).
+- If the system is set to "page scroll", the value will be `i32::MAX` or `i32::MIN` to indicate a page scroll direction.
+- All mouse button and movement actions are reported via ergonomic enums.
+
 
 ## Stopping the Listener
 
